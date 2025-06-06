@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collaborative Presentation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .card:hover {
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+<div class="container py-5">
+    <div class="text-center mb-5">
+        <h1 class="display-5 fw-bold">📽️ CollabSlides</h1>
+        <p class="lead text-muted">Create or join collaborative presentations in real-time. No login required.</p>
+    </div>
+
+    <!-- Nickname Input -->
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-6">
+            <div class="input-group">
+                <input type="text" id="nickname" class="form-control" placeholder="Enter your nickname" />
+                <button class="btn btn-primary" onclick="setNickname()">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create New Presentation -->
+    <div class="row justify-content-center mb-5">
+        <div class="col-md-6 text-center">
+            <button class="btn btn-success btn-lg" onclick="createPresentation()">➕ Create New Presentation</button>
+        </div>
+    </div>
+
+    <!-- List of Presentations -->
+    <div class="row">
+        <h4 class="mb-4">📋 Join an existing presentation</h4>
+        <div class="col-12">
+            <div class="row row-cols-1 row-cols-md-2 g-3" id="presentation-list">
+                <!-- Presentation cards will be rendered here -->
+                <!-- Example card -->
+                <div class="col">
+                    <div class="card p-3" onclick="joinPresentation(1)">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">Marketing Pitch Q3</h5>
+                            <span class="badge bg-primary">4 users</span>
+                        </div>
+                        <small class="text-muted">Created by: Alex</small>
+                    </div>
+                </div>
+
+                <!-- Add more presentation items dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function setNickname() {
+        const nickname = document.getElementById("nickname").value.trim();
+        if (!nickname) {
+            alert("Please enter your nickname");
+            return;
+        }
+        localStorage.setItem("nickname", nickname);
+        alert("Nickname saved!");
+    }
+
+    function joinPresentation(id) {
+        const nickname = localStorage.getItem("nickname");
+        if (!nickname) {
+            alert("Please enter a nickname first.");
+            return;
+        }
+        // Redirect to presentation
+        window.location.href = `/presentation/${id}`;
+    }
+
+    // Fetch and render list of presentations
+    async function loadPresentations() {
+        const response = await fetch('/presentation/list');
+        const presentations = await response.json();
+
+        const container = document.getElementById('presentation-list');
+        container.innerHTML = '';
+
+        for (const id in presentations) {
+            const p = presentations[id];
+            const card = document.createElement('div');
+            card.className = 'col';
+            card.innerHTML = `
+      <div class="card p-3" onclick="joinPresentation('${p.id}')">
+        <div class="d-flex justify-content-between align-items-center">
+          <h5 class="mb-1">${p.title}</h5>
+          <span class="badge bg-primary">${p.users.length} users</span>
+        </div>
+        <small class="text-muted">Created by: ${p.created_by}</small>
+      </div>
+    `;
+            container.appendChild(card);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadPresentations);
+
+    function createPresentation() {
+        const nickname = localStorage.getItem("nickname");
+        if (!nickname) {
+            alert("Please enter a nickname first.");
+            return;
+        }
+        fetch("/presentation/create", {
+            method: "POST",
+            body: new URLSearchParams({ nickname }),
+        })
+            .then(res => res.json())
+            .then(data => {
+                window.location.href = `/presentation/${data.id}`;
+            });
+    }
+
+
+</script>
+</body>
+</html>

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Slide Editor with Multiple Slides</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        .top-toolbar {
+            height: 50px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 10px;
+        }
+        /* Left panel for slides */
+        .left-panel {
+            width: 200px;
+            background: #f1f1f1;
+            position: absolute;
+            top: 50px;
+            bottom: 0;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        /* Main slide area */
+        .slide-area {
+            position: absolute;
+            top: 50px;
+            left: 200px;
+            right: 250px; /* leave space for user sidebar */
+            bottom: 0;
+            background: #ffffff;
+            overflow: auto;
+            padding: 10px;
+        }
+        /* Connection user list sidebar (fixed) on right */
+        #userSidebar {
+            position: fixed;
+            top: 50px;
+            right: 0;
+            width: 240px;
+            height: calc(100% - 50px);
+            background: #f8f9fa;
+            border-left: 1px solid #dee2e6;
+            padding: 10px;
+            overflow-y: auto;
+            font-size: 0.85rem; /* small size for compact */
+        }
+        /* Style for the slide canvas inside slide area */
+        .slide-canvas {
+            position: relative;
+            width: 100%;
+            height: 600px;
+            min-height: 600px;
+            border: 1px solid #ddd;
+            background: #fff;
+        }
+        /* Draggable text blocks styling */
+        .text-block {
+            position: absolute;
+            border: 1px dashed #999;
+            padding: 8px;
+            background: #fff;
+            min-width: 100px;
+            min-height: 50px;
+            cursor: move;
+            user-select: none;
+        }
+        /* Content editable focus style */
+        .text-block[contenteditable="true"]:focus {
+            outline: 2px solid #007bff;
+            user-select: text;
+        }
+        /* Slide list styles */
+        .slide-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .slide-list button {
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 500;
+        }
+        /* Active slide button style */
+        .slide-list button.active {
+            background-color: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+<!-- Top toolbar -->
+<div class="top-toolbar">
+    <button id="addText" class="btn btn-primary btn-sm">Add Text Block</button>
+    <!-- Optional button to toggle user list visibility -->
+    <button id="toggleUserList" class="btn btn-outline-secondary btn-sm">Show Users</button>
+</div>
+
+<!-- Left panel for slide navigation -->
+<div class="left-panel">
+    <button id="addSlide" class="btn btn-success btn-sm mb-2">+ Add New Slide</button>
+    <div id="slideList" class="slide-list"></div>
+</div>
+
+<!-- The main slide editing area -->
+<div class="slide-area">
+    <div id="slideCanvas" class="slide-canvas"></div>
+</div>
+
+<!-- Sidebar for connected users -->
+<div id="userSidebar" aria-label="Connected Users">
+    <h6 class="mb-2">Connected Users</h6>
+    <ul id="userList" class="list-group"></ul>
+</div>
+
+<!-- Include interact.js for drag & resize -->
+<script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+<script>
+    // Data for users
+    const users = [
+        { id: 1, name: "Alice (You)", role: "Editor", isCurrentUser: true },
+        { id: 2, name: "Bob", role: "Viewer", isCurrentUser: false },
+        { id: 3, name: "Carol", role: "Viewer", isCurrentUser: false },
+    ];
+
+    // State variables
+    const slideListEl = document.getElementById('slideList');
+    const slideCanvas = document.getElementById('slideCanvas');
+    const addTextBtn = document.getElementById('addText');
+    const addSlideBtn = document.getElementById('addSlide');
+    const userListEl = document.getElementById('userList');
+    const toggleUserBtn = document.getElementById('toggleUserList');
+    const userSidebar = document.getElementById('userSidebar');
+
+    let slides = [];
+    let currentSlideIndex = -1;
+    let userListVisible = true; // toggle state
+
+    // Add new slide
+    function addNewSlide() {
+        slides.push({ blocks: [] });
+        loadSlide(slides.length - 1);
+    }
+
+    // Load a slide by index
+    function loadSlide(index) {
+        if (index === currentSlideIndex) return;
+        saveCurrentSlide();
+        currentSlideIndex = index;
+        slideCanvas.innerHTML = '';
+
+        const slide = slides[index];
+        if (!slide) return;
+
+        // Add existing blocks
+        slide.blocks.forEach(blockData => {
+            const block = createTextBlock(blockData.x, blockData.y, '');
+            // Apply saved size and HTML content
+            block.style.width = blockData.width + 'px';
+            block.style.height = blockData.height + 'px';
+
+            if (blockData.content.startsWith('<')) {
+                // HTML content
+                block.innerHTML = blockData.content;
+                block.setAttribute('contenteditable', 'false');
+            } else {
+                // Plain text
+                block.innerText = blockData.content;
+                block.setAttribute('contenteditable', 'true');
+            }
+            slideCanvas.appendChild(block);
+        });
+        updateSlideListUI();
+    }
+
+    // Save current slide's blocks
+    function saveCurrentSlide() {
+        if (currentSlideIndex < 0 || !slides[currentSlideIndex]) return;
+        const slide = slides[currentSlideIndex];
+        slide.blocks = [];
+        const nodes = slideCanvas.querySelectorAll('.text-block');
+        nodes.forEach(node => {
+            slide.blocks.push({
+                x: parseFloat(node.style.left) + (parseFloat(node.dataset.x) || 0),
+                y: parseFloat(node.style.top) + (parseFloat(node.dataset.y) || 0),
+                width: node.offsetWidth,
+                height: node.offsetHeight,
+                content: node.getAttribute('contenteditable') === 'true' ? node.innerText : node.innerHTML,
+            });
+        });
+    }
+
+    // Create a new text block with drag/resize
+    function createTextBlock(x = 50, y = 50, content = "Edit _markdown_ text...") {
+        const block = document.createElement('div');
+        block.className = 'text-block';
+        block.setAttribute('contenteditable', 'true');
+        block.style.top = y + 'px';
+        block.style.left = x + 'px';
+
+        // Initially set inner text
+        block.innerText = content;
+
+        // Event: save on blur (leave editing)
+        block.addEventListener('blur', () => {
+            // Convert markdown to HTML if needed, or keep plain
+            // For simplicity, keep plain text here
+            block.setAttribute('contenteditable', 'false');
+            saveCurrentSlide();
+        });
+
+        // Event: enable editing on double click
+        block.addEventListener('dblclick', () => {
+            block.setAttribute('contenteditable', 'true');
+            block.focus();
+        });
+
+        // Make draggable & resizable
+        interact(block).draggable({
+            listeners: {
+                move(event) {
+                    const target = event.target;
+                    const x = (parseFloat(target.dataset.x) || 0) + event.dx;
+                    const y = (parseFloat(target.dataset.y) || 0) + event.dy;
+                    target.style.transform = `translate(${x}px, ${y}px)`;
+                    target.dataset.x = x;
+                    target.dataset.y = y;
+                }
+            }
+        }).resizable({
+            edges: { left: true, right: true, bottom: true, top: true },
+            listeners: {
+                move(event) {
+                    const target = event.target;
+                    let x = parseFloat(target.dataset.x) || 0;
+                    let y = parseFloat(target.dataset.y) || 0;
+                    target.style.width = event.rect.width + 'px';
+                    target.style.height = event.rect.height + 'px';
+                    x += event.deltaRect.left;
+                    y += event.deltaRect.top;
+                    target.style.transform = `translate(${x}px, ${y}px)`;
+                    target.dataset.x = x;
+                    target.dataset.y = y;
+                }
+            }
+        });
+        return block;
+    }
+
+    // Update slide list UI
+    function updateSlideListUI() {
+        slideListEl.innerHTML = '';
+        slides.forEach((slide, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm ' + (i===currentSlideIndex ? 'active' : '');
+            btn.textContent = `Slide ${i + 1} (${slide.blocks.length} block${slide.blocks.length !== 1 ? 's' : ''})`;
+            btn.onclick = () => loadSlide(i);
+            slideListEl.appendChild(btn);
+        });
+    }
+
+    // Event handlers
+    document.getElementById('addSlide').addEventListener('click', addNewSlide);
+    document.getElementById('addText').addEventListener('click', () => {
+        if (currentSlideIndex < 0) {
+            alert('Please add a slide first.');
+            return;
+        }
+        const block = createTextBlock(50, 50);
+        slideCanvas.appendChild(block);
+        saveCurrentSlide();
+        updateSlideListUI();
+    });
+
+    // Toggle user list visibility
+    document.getElementById('toggleUserList').addEventListener('click', () => {
+        userListVisible = !userListVisible;
+        userSidebar.style.display = userListVisible ? 'block' : 'none';
+        toggleUserBtn.textContent = userListVisible ? 'Hide Users' : 'Show Users';
+    });
+
+    // Render user list
+    function renderUserList() {
+        userListEl.innerHTML = '';
+        users.forEach(user => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center small';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.innerHTML = user.name;
+            if (user.isCurrentUser) {
+                nameSpan.style.fontWeight = 'bold';
+            }
+
+            const roleBadge = document.createElement('span');
+            roleBadge.textContent = user.role;
+            roleBadge.className = `badge ms-2 ${user.role === 'Editor' ? 'bg-success' : 'bg-secondary'}`;
+
+            li.appendChild(nameSpan);
+            li.appendChild(roleBadge);
+
+            if (!user.isCurrentUser) {
+                const toggleBtn = document.createElement('button');
+                toggleBtn.className = 'btn btn-sm btn-outline-primary ms-2';
+                toggleBtn.style.minWidth = '120px';
+                toggleBtn.textContent = user.role === 'Editor' ? 'Revoke Editor' : 'Assign Editor';
+
+                toggleBtn.onclick = () => {
+                    user.role = user.role === 'Editor' ? 'Viewer' : 'Editor';
+                    renderUserList();
+                };
+                li.appendChild(toggleBtn);
+            }
+
+            userListEl.appendChild(li);
+        });
+    }
+
+    // Initialize
+    addNewSlide(); // start with one slide
+    renderUserList(); // display users
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    const slideCanvas = document.getElementById('slideCanvas');
+    const slideListEl = document.getElementById('slideList');
+    const userListEl = document.getElementById('userList');
+    const toggleUserBtn = document.getElementById('toggleUserList');
+    const userSidebar = document.getElementById('userSidebar');
+
+    const presentationId = window.location.pathname.split('/').pop();
+    const nickname = localStorage.getItem('nickname') || 'Guest';
+    let presentation = null;
+    let currentSlideIndex = 0;
+    let userListVisible = true;
+
+    async function loadPresentation() {
+        const res = await fetch(`/presentation/${presentationId}`);
+        presentation = await res.json();
+        if (!presentation) return alert("Presentation not found");
+
+        // Add user to list if not already present
+        if (!presentation.users.find(u => u.name === nickname)) {
+            presentation.users.push({ name: nickname, role: "Viewer" });
+            await savePresentation();
+        }
+
+        renderSlides();
+        renderUserList();
+        loadSlide(0);
+    }
+
+    function renderSlides() {
+        slideListEl.innerHTML = '';
+        presentation.slides.forEach((slide, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm ' + (i === currentSlideIndex ? 'active' : '');
+            btn.textContent = `Slide ${i + 1} (${slide.blocks.length} block${slide.blocks.length !== 1 ? 's' : ''})`;
+            btn.onclick = () => loadSlide(i);
+            slideListEl.appendChild(btn);
+        });
+    }
+
+    function renderUserList() {
+        userListEl.innerHTML = '';
+        presentation.users.forEach(user => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center small';
+            li.innerHTML = `
+        <span style="${user.name === nickname ? 'font-weight:bold;' : ''}">${user.name}</span>
+        <span class="badge ms-2 ${user.role === 'Editor' ? 'bg-success' : 'bg-secondary'}">${user.role}</span>
+      `;
+            userListEl.appendChild(li);
+        });
+    }
+
+    function loadSlide(index) {
+        saveSlide();
+        currentSlideIndex = index;
+        const slide = presentation.slides[index];
+        if (!slide) return;
+
+        slideCanvas.innerHTML = '';
+        slide.blocks.forEach(block => {
+            const b = createTextBlock(block.x, block.y, block.content);
+            b.style.width = block.width + 'px';
+            b.style.height = block.height + 'px';
+            slideCanvas.appendChild(b);
+        });
+        renderSlides();
+    }
+
+    function saveSlide() {
+        if (!presentation) return;
+        const blocks = Array.from(slideCanvas.querySelectorAll('.text-block')).map(node => ({
+            x: parseFloat(node.style.left || 0) + (parseFloat(node.dataset.x) || 0),
+            y: parseFloat(node.style.top || 0) + (parseFloat(node.dataset.y) || 0),
+            width: node.offsetWidth,
+            height: node.offsetHeight,
+            content: node.innerText
+        }));
+        presentation.slides[currentSlideIndex].blocks = blocks;
+    }
+
+    function createTextBlock(x = 50, y = 50, content = 'Edit _markdown_ text...') {
+        const block = document.createElement('div');
+        block.className = 'text-block';
+        block.setAttribute('contenteditable', 'true');
+        block.style.top = y + 'px';
+        block.style.left = x + 'px';
+        block.innerText = content;
+
+        block.addEventListener('blur', () => {
+            block.setAttribute('contenteditable', 'false');
+            saveSlide();
+            savePresentation();
+        });
+
+        block.addEventListener('dblclick', () => {
+            block.setAttribute('contenteditable', 'true');
+            block.focus();
+        });
+
+        interact(block).draggable({
+            listeners: {
+                move(event) {
+                    const target = event.target;
+                    const x = (parseFloat(target.dataset.x) || 0) + event.dx;
+                    const y = (parseFloat(target.dataset.y) || 0) + event.dy;
+                    target.style.transform = `translate(${x}px, ${y}px)`;
+                    target.dataset.x = x;
+                    target.dataset.y = y;
+                }
+            }
+        }).resizable({
+            edges: { left: true, right: true, bottom: true, top: true },
+            listeners: {
+                move(event) {
+                    const target = event.target;
+                    let x = parseFloat(target.dataset.x) || 0;
+                    let y = parseFloat(target.dataset.y) || 0;
+                    target.style.width = event.rect.width + 'px';
+                    target.style.height = event.rect.height + 'px';
+                    x += event.deltaRect.left;
+                    y += event.deltaRect.top;
+                    target.style.transform = `translate(${x}px, ${y}px)`;
+                    target.dataset.x = x;
+                    target.dataset.y = y;
+                }
+            }
+        });
+        return block;
+    }
+
+    async function savePresentation() {
+        await fetch(`/presentation/${presentationId}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(presentation)
+        });
+    }
+
+    document.getElementById('addSlide').addEventListener('click', () => {
+        const creator = presentation.users.find(u => u.name === nickname && u.role === 'Creator');
+        if (!creator) {
+            alert('Only the creator can add new slides.');
+            return;
+        }
+        presentation.slides.push({ blocks: [] });
+        currentSlideIndex = presentation.slides.length - 1;
+        loadSlide(currentSlideIndex);
+        savePresentation();
+    });
+
+    document.getElementById('addText').addEventListener('click', () => {
+        const user = presentation.users.find(u => u.name === nickname);
+        if (user?.role !== 'Editor' && user?.role !== 'Creator') {
+            alert('Only editors can add text blocks.');
+            return;
+        }
+        const block = createTextBlock();
+        slideCanvas.appendChild(block);
+        saveSlide();
+        savePresentation();
+    });
+
+    toggleUserBtn.addEventListener('click', () => {
+        userListVisible = !userListVisible;
+        userSidebar.style.display = userListVisible ? 'block' : 'none';
+        toggleUserBtn.textContent = userListVisible ? 'Hide Users' : 'Show Users';
+    });
+
+    // Auto-poll to fetch latest
+    setInterval(async () => {
+        const res = await fetch(`/presentation/${presentationId}/data`);
+        const latest = await res.json();
+        if (JSON.stringify(latest.slides) !== JSON.stringify(presentation.slides)) {
+            presentation.slides = latest.slides;
+            loadSlide(currentSlideIndex);
+        }
+        presentation.users = latest.users;
+        renderUserList();
+    }, 3000);
+
+    loadPresentation();
+</script>
+
+
+</body>
+</html>
